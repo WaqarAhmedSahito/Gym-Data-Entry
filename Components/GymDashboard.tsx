@@ -9,11 +9,10 @@ export default function GymDashboard() {
   const [members, setMembers] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // State for the Edit Modal
   const [editingMember, setEditingMember] = useState<any>(null);
 
   const [formData, setFormData] = useState({
-    full_name: '', father_name: '', phone: '',
+    serial_no: '', full_name: '', father_name: '', phone: '',
     join_date: new Date().toISOString().split('T')[0],
     shift: 'Evening',
     fee_month: new Date().toLocaleString('default', { month: 'long', year: 'numeric' }),
@@ -37,7 +36,9 @@ export default function GymDashboard() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const data: any = formData; 
+    
     const cleanData = {
+      serial_no: data.serial_no,
       full_name: data.full_name || data.fullName,
       father_name: data.father_name || data.fatherName || "",
       phone: data.phone,
@@ -59,7 +60,7 @@ export default function GymDashboard() {
 
     fetchMembers(); 
     setFormData({
-      full_name: '', father_name: '', phone: '',
+      serial_no: '', full_name: '', father_name: '', phone: '',
       join_date: new Date().toISOString().split('T')[0],
       shift: 'Evening',
       fee_month: new Date().toLocaleString('default', { month: 'long', year: 'numeric' }),
@@ -71,6 +72,7 @@ export default function GymDashboard() {
   const handleUpdateMember = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanData = {
+      serial_no: editingMember.serial_no, // NEW: Edit Serial Number
       full_name: editingMember.full_name,
       father_name: editingMember.father_name,
       phone: editingMember.phone,
@@ -81,7 +83,6 @@ export default function GymDashboard() {
       cardio_fee: Number(editingMember.cardio_fee) || 0,
       trainer_fee: Number(editingMember.trainer_fee) || 0,
       paid_amount: Number(editingMember.paid_amount) || 0,
-      // If empty string, send null (meaning bill forever). Otherwise, send the number limit.
       cardio_months: editingMember.cardio_months === '' || editingMember.cardio_months === null ? null : Number(editingMember.cardio_months),
       trainer_months: editingMember.trainer_months === '' || editingMember.trainer_months === null ? null : Number(editingMember.trainer_months),
     };
@@ -115,7 +116,7 @@ export default function GymDashboard() {
     }
   };
 
-  // AUTOMATIC CALCULATOR (UPDATED FOR DROPPED SERVICES)
+  // AUTOMATIC CALCULATOR
   const calculateBalance = (member: any) => {
     const today = new Date();
     const joinDate = new Date(member.join_date);
@@ -128,16 +129,13 @@ export default function GymDashboard() {
     const cardio = Number(member.cardio_fee) || 0;
     const trainer = Number(member.trainer_fee) || 0;
 
-    // IMPORTANT MATH FIX: If they have a limit set, use the limit. If not, bill for all active months.
     const cardioMonthsToBill = member.cardio_months !== null ? Number(member.cardio_months) : totalMonthsActive;
     const trainerMonthsToBill = member.trainer_months !== null ? Number(member.trainer_months) : totalMonthsActive;
     
-    // Calculate total cost accurately
     const totalCost = (monthly * totalMonthsActive) + (cardio * cardioMonthsToBill) + (trainer * trainerMonthsToBill) + admission;
     const paid = Number(member.paid_amount) || 0;
     const moneyLeft = totalCost - paid;
 
-    // Display logic for current active recurring fee
     let activeRecurring = monthly;
     if (cardioMonthsToBill >= totalMonthsActive) activeRecurring += cardio;
     if (trainerMonthsToBill >= totalMonthsActive) activeRecurring += trainer;
@@ -146,7 +144,11 @@ export default function GymDashboard() {
   };
 
   const filteredMembers = useMemo(() => {
-    return members.filter(m => m.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || m.phone.includes(searchQuery));
+    return members.filter(m => 
+      m.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      m.phone.includes(searchQuery) ||
+      (m.serial_no && m.serial_no.toLowerCase().includes(searchQuery.toLowerCase())) // Can now search by Serial No too!
+    );
   }, [members, searchQuery]);
 
   return (
@@ -169,6 +171,11 @@ export default function GymDashboard() {
             <UserPlus className="mr-2" /> NEW ADMISSION
           </h2>
           <form onSubmit={handleSubmit} className="space-y-4">
+            
+            {/* NEW: Serial Number Input */}
+            <input required placeholder="Serial No. " className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-yellow-500 outline-none font-mono" 
+              value={formData.serial_no} onChange={e => setFormData({...formData, serial_no: e.target.value})} />
+              
             <input required placeholder="Full Name" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-yellow-500 outline-none" 
               value={formData.full_name} onChange={e => setFormData({...formData, full_name: e.target.value})} />
             <input placeholder="Father Name" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-yellow-500 outline-none" 
@@ -232,7 +239,7 @@ export default function GymDashboard() {
         <div className="xl:col-span-8 space-y-4">
           <div className="relative z-0">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input placeholder="Search by name or phone..." className="w-full bg-zinc-900 border border-zinc-800 p-4 pl-12 rounded-xl focus:border-yellow-500 outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            <input placeholder="Search by name, phone, or serial..." className="w-full bg-zinc-900 border border-zinc-800 p-4 pl-12 rounded-xl focus:border-yellow-500 outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           </div>
 
           <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800 min-h-[400px]">
@@ -246,7 +253,12 @@ export default function GymDashboard() {
                   
                   {/* Left Side: Info */}
                   <div className="mb-3 md:mb-0">
-                    <h3 className="font-bold text-lg text-white">{member.full_name}</h3>
+                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                      {/* Displays the manual serial number */}
+                      <span className="text-zinc-600 font-mono text-sm">#{member.serial_no || 'N/A'}</span>
+                      {member.full_name}
+                    </h3>
+
                     <div className="flex flex-wrap items-center gap-2 mt-1">
                       <span className="text-zinc-400 text-sm">{member.phone}</span>
                       <span className="text-zinc-600 text-xs">•</span>
@@ -274,7 +286,6 @@ export default function GymDashboard() {
                     <button onClick={() => handlePayment(member)} className="text-zinc-600 hover:text-green-500 p-2 transition-colors" title="Add Payment">
                       <Banknote size={18} />
                     </button>
-                    {/* NEW: Edit Member Button */}
                     <button onClick={() => setEditingMember(member)} className="text-zinc-600 hover:text-blue-500 p-2 transition-colors" title="Edit Member/Settings">
                       <Settings size={18} />
                     </button>
@@ -290,7 +301,7 @@ export default function GymDashboard() {
         </div>
       </div>
 
-      {/* NEW: THE EDIT MEMBER MODAL OVERLAY */}
+      {/* EDIT MEMBER MODAL */}
       {editingMember && (
         <div className="fixed inset-0 bg-black/90 flex justify-center items-center z-50 p-4">
           <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -301,8 +312,13 @@ export default function GymDashboard() {
             
             <form onSubmit={handleUpdateMember} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
+                {/* NEW: Serial number added to the edit menu */}
+                <div><label className="text-xs text-zinc-500 ml-1">Serial Number</label>
+                <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg font-mono" value={editingMember.serial_no || ''} onChange={e => setEditingMember({...editingMember, serial_no: e.target.value})} /></div>
+                
                 <div><label className="text-xs text-zinc-500 ml-1">Full Name</label>
                 <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.full_name} onChange={e => setEditingMember({...editingMember, full_name: e.target.value})} /></div>
+                
                 <div><label className="text-xs text-zinc-500 ml-1">Phone Number</label>
                 <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.phone} onChange={e => setEditingMember({...editingMember, phone: e.target.value})} /></div>
               </div>
@@ -314,7 +330,6 @@ export default function GymDashboard() {
                  <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-green-500" value={editingMember.paid_amount} onChange={e => setEditingMember({...editingMember, paid_amount: e.target.value})} /></div>
               </div>
 
-              {/* The Magic "Drop Service" Controls */}
               <div className="grid grid-cols-2 gap-4 border-t border-zinc-800 pt-4 mt-4 bg-zinc-900/50 p-4 rounded-xl">
                  <div>
                     <label className="text-xs text-zinc-400 font-bold ml-1">Cardio Fee Amount</label>
@@ -322,7 +337,6 @@ export default function GymDashboard() {
                     
                     <label className="text-xs text-red-400 font-bold ml-1">Limit Cardio (Months Billed)</label>
                     <input type="number" placeholder="Leave empty to bill forever" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.cardio_months !== null ? editingMember.cardio_months : ''} onChange={e => setEditingMember({...editingMember, cardio_months: e.target.value})} />
-                    <p className="text-[10px] text-zinc-500 mt-1">Example: Type "1" if they dropped cardio after month 1.</p>
                  </div>
                  
                  <div>
@@ -331,7 +345,6 @@ export default function GymDashboard() {
                     
                     <label className="text-xs text-red-400 font-bold ml-1">Limit Trainer (Months Billed)</label>
                     <input type="number" placeholder="Leave empty to bill forever" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.trainer_months !== null ? editingMember.trainer_months : ''} onChange={e => setEditingMember({...editingMember, trainer_months: e.target.value})} />
-                    <p className="text-[10px] text-zinc-500 mt-1">Type the exact number of months they used the trainer.</p>
                  </div>
               </div>
 
