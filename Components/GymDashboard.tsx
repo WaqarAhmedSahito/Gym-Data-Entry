@@ -24,7 +24,8 @@ export default function GymDashboard() {
     const { data, error } = await supabase
       .from('members')
       .select('*')
-      .order('created_at', { ascending: false });
+      // CHANGED: Now orders by when the client actually joined, not when they were entered into the computer!
+      .order('join_date', { ascending: false });
     
     if (!error) setMembers(data || []);
     setLoading(false);
@@ -72,13 +73,13 @@ export default function GymDashboard() {
   const handleUpdateMember = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanData = {
-      serial_no: editingMember.serial_no, // NEW: Edit Serial Number
+      serial_no: editingMember.serial_no,
       full_name: editingMember.full_name,
-      father_name: editingMember.father_name,
+      father_name: editingMember.father_name, // Now handles father name updates
       phone: editingMember.phone,
-      join_date: editingMember.join_date,
-      shift: editingMember.shift,
-      admission_fee: Number(editingMember.admission_fee) || 0,
+      join_date: editingMember.join_date,     // Now handles join date updates
+      shift: editingMember.shift,             // Now handles shift updates
+      admission_fee: Number(editingMember.admission_fee) || 0, // Now handles admission updates
       monthly_fee: Number(editingMember.monthly_fee) || 0,
       cardio_fee: Number(editingMember.cardio_fee) || 0,
       trainer_fee: Number(editingMember.trainer_fee) || 0,
@@ -147,7 +148,8 @@ export default function GymDashboard() {
     return members.filter(m => 
       m.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || 
       m.phone.includes(searchQuery) ||
-      (m.serial_no && m.serial_no.toLowerCase().includes(searchQuery.toLowerCase())) // Can now search by Serial No too!
+      (m.serial_no && m.serial_no.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (m.shift && m.shift.toLowerCase().includes(searchQuery.toLowerCase())) // CHANGED: Added ability to search by shift
     );
   }, [members, searchQuery]);
 
@@ -172,7 +174,6 @@ export default function GymDashboard() {
           </h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             
-            {/* NEW: Serial Number Input */}
             <input required placeholder="Serial No. " className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-yellow-500 outline-none font-mono" 
               value={formData.serial_no} onChange={e => setFormData({...formData, serial_no: e.target.value})} />
               
@@ -239,7 +240,7 @@ export default function GymDashboard() {
         <div className="xl:col-span-8 space-y-4">
           <div className="relative z-0">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input placeholder="Search by name, phone, or serial..." className="w-full bg-zinc-900 border border-zinc-800 p-4 pl-12 rounded-xl focus:border-yellow-500 outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            <input placeholder="Search by name, phone, serial, or shift..." className="w-full bg-zinc-900 border border-zinc-800 p-4 pl-12 rounded-xl focus:border-yellow-500 outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           </div>
 
           <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800 min-h-[400px]">
@@ -254,7 +255,6 @@ export default function GymDashboard() {
                   {/* Left Side: Info */}
                   <div className="mb-3 md:mb-0">
                     <h3 className="font-bold text-lg text-white flex items-center gap-2">
-                      {/* Displays the manual serial number */}
                       <span className="text-zinc-600 font-mono text-sm">#{member.serial_no || 'N/A'}</span>
                       {member.full_name}
                     </h3>
@@ -301,7 +301,7 @@ export default function GymDashboard() {
         </div>
       </div>
 
-      {/* EDIT MEMBER MODAL */}
+      {/* EXPANDED EDIT MEMBER MODAL */}
       {editingMember && (
         <div className="fixed inset-0 bg-black/90 flex justify-center items-center z-50 p-4">
           <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -311,25 +311,51 @@ export default function GymDashboard() {
             </div>
             
             <form onSubmit={handleUpdateMember} className="space-y-4">
+              
+              {/* Row 1: Core User Info */}
               <div className="grid grid-cols-2 gap-4">
-                {/* NEW: Serial number added to the edit menu */}
                 <div><label className="text-xs text-zinc-500 ml-1">Serial Number</label>
                 <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg font-mono" value={editingMember.serial_no || ''} onChange={e => setEditingMember({...editingMember, serial_no: e.target.value})} /></div>
                 
                 <div><label className="text-xs text-zinc-500 ml-1">Full Name</label>
                 <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.full_name} onChange={e => setEditingMember({...editingMember, full_name: e.target.value})} /></div>
                 
+                <div><label className="text-xs text-zinc-500 ml-1">Father Name</label>
+                <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.father_name || ''} onChange={e => setEditingMember({...editingMember, father_name: e.target.value})} /></div>
+
                 <div><label className="text-xs text-zinc-500 ml-1">Phone Number</label>
                 <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.phone} onChange={e => setEditingMember({...editingMember, phone: e.target.value})} /></div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 border-t border-zinc-800 pt-4">
+              {/* Row 2: Dates and Shifts */}
+              <div className="grid grid-cols-2 gap-4 border-t border-zinc-800 pt-4 mt-4">
+                 <div>
+                   <label className="text-xs text-zinc-500 ml-1">Join Date</label>
+                   <input type="date" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg [color-scheme:dark]" value={editingMember.join_date} onChange={e => setEditingMember({...editingMember, join_date: e.target.value})} />
+                 </div>
+                 <div>
+                   <label className="text-xs text-zinc-500 ml-1">Shift</label>
+                   <select className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white" value={editingMember.shift} onChange={e => setEditingMember({...editingMember, shift: e.target.value})}>
+                     <option value="Morning">Morning</option>
+                     <option value="Evening">Evening</option>
+                     <option value="Both">Both</option>
+                   </select>
+                 </div>
+              </div>
+
+              {/* Row 3: Standard Fees */}
+              <div className="grid grid-cols-3 gap-4 border-t border-zinc-800 pt-4 mt-4">
+                 <div><label className="text-xs text-zinc-500 ml-1">Admission Fee</label>
+                 <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.admission_fee} onChange={e => setEditingMember({...editingMember, admission_fee: e.target.value})} /></div>
+
                  <div><label className="text-xs text-zinc-500 ml-1">Monthly Gym Fee</label>
                  <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.monthly_fee} onChange={e => setEditingMember({...editingMember, monthly_fee: e.target.value})} /></div>
+
                  <div><label className="text-xs text-zinc-500 ml-1">Total Paid So Far</label>
                  <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-green-500" value={editingMember.paid_amount} onChange={e => setEditingMember({...editingMember, paid_amount: e.target.value})} /></div>
               </div>
 
+              {/* Row 4: Extra Service Caps */}
               <div className="grid grid-cols-2 gap-4 border-t border-zinc-800 pt-4 mt-4 bg-zinc-900/50 p-4 rounded-xl">
                  <div>
                     <label className="text-xs text-zinc-400 font-bold ml-1">Cardio Fee Amount</label>
@@ -348,7 +374,7 @@ export default function GymDashboard() {
                  </div>
               </div>
 
-              <div className="flex gap-4 pt-4 border-t border-zinc-800">
+              <div className="flex gap-4 pt-4 border-t border-zinc-800 mt-2">
                  <button type="button" onClick={() => setEditingMember(null)} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-lg transition-colors">Cancel</button>
                  <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-transform active:scale-95">Save Profile Updates</button>
               </div>
