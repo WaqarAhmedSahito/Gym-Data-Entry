@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase'; 
-import { Search, UserPlus, Trash2, LogOut, Loader2, CheckCircle2, AlertCircle, Banknote, Calendar, Clock, Settings, X } from 'lucide-react';
+import { Search, UserPlus, Trash2, LogOut, Loader2, CheckCircle2, AlertCircle, Banknote, Calendar, Clock, Settings, X, Users, Wallet } from 'lucide-react';
 
 export default function GymDashboard() {
   const [loading, setLoading] = useState(true);
@@ -24,7 +24,6 @@ export default function GymDashboard() {
     const { data, error } = await supabase
       .from('members')
       .select('*')
-      // CHANGED: Now orders by when the client actually joined, not when they were entered into the computer!
       .order('join_date', { ascending: false });
     
     if (!error) setMembers(data || []);
@@ -32,6 +31,52 @@ export default function GymDashboard() {
   };
 
   useEffect(() => { fetchMembers(); }, []);
+
+  // AUTOMATIC CALCULATOR (Moved up so the Analytics can use it)
+  const calculateBalance = (member: any) => {
+    const today = new Date();
+    const joinDate = new Date(member.join_date);
+    
+    const monthsDiff = (today.getFullYear() - joinDate.getFullYear()) * 12 + (today.getMonth() - joinDate.getMonth());
+    const totalMonthsActive = Math.max(1, monthsDiff + 1);
+
+    const admission = Number(member.admission_fee) || 0;
+    const monthly = Number(member.monthly_fee) || 0;
+    const cardio = Number(member.cardio_fee) || 0;
+    const trainer = Number(member.trainer_fee) || 0;
+
+    const cardioMonthsToBill = member.cardio_months !== null ? Number(member.cardio_months) : totalMonthsActive;
+    const trainerMonthsToBill = member.trainer_months !== null ? Number(member.trainer_months) : totalMonthsActive;
+    
+    const totalCost = (monthly * totalMonthsActive) + (cardio * cardioMonthsToBill) + (trainer * trainerMonthsToBill) + admission;
+    const paid = Number(member.paid_amount) || 0;
+    const moneyLeft = totalCost - paid;
+
+    let activeRecurring = monthly;
+    if (cardioMonthsToBill >= totalMonthsActive) activeRecurring += cardio;
+    if (trainerMonthsToBill >= totalMonthsActive) activeRecurring += trainer;
+
+    return { totalMonthsActive, moneyLeft, totalCost, activeRecurring };
+  };
+
+  // NEW: Calculate Dashboard Analytics
+  const stats = useMemo(() => {
+    let totalDue = 0;
+    let clearCount = 0;
+    let dueCount = 0;
+
+    members.forEach(member => {
+      const { moneyLeft } = calculateBalance(member);
+      if (moneyLeft <= 0) {
+        clearCount++;
+      } else {
+        dueCount++;
+        totalDue += moneyLeft;
+      }
+    });
+
+    return { totalUsers: members.length, totalDue, clearCount, dueCount };
+  }, [members]);
 
   // Add New Member
   const handleSubmit = async (e: React.FormEvent) => {
@@ -75,11 +120,11 @@ export default function GymDashboard() {
     const cleanData = {
       serial_no: editingMember.serial_no,
       full_name: editingMember.full_name,
-      father_name: editingMember.father_name, // Now handles father name updates
+      father_name: editingMember.father_name,
       phone: editingMember.phone,
-      join_date: editingMember.join_date,     // Now handles join date updates
-      shift: editingMember.shift,             // Now handles shift updates
-      admission_fee: Number(editingMember.admission_fee) || 0, // Now handles admission updates
+      join_date: editingMember.join_date,
+      shift: editingMember.shift,
+      admission_fee: Number(editingMember.admission_fee) || 0,
       monthly_fee: Number(editingMember.monthly_fee) || 0,
       cardio_fee: Number(editingMember.cardio_fee) || 0,
       trainer_fee: Number(editingMember.trainer_fee) || 0,
@@ -117,45 +162,18 @@ export default function GymDashboard() {
     }
   };
 
-  // AUTOMATIC CALCULATOR
-  const calculateBalance = (member: any) => {
-    const today = new Date();
-    const joinDate = new Date(member.join_date);
-    
-    const monthsDiff = (today.getFullYear() - joinDate.getFullYear()) * 12 + (today.getMonth() - joinDate.getMonth());
-    const totalMonthsActive = Math.max(1, monthsDiff + 1);
-
-    const admission = Number(member.admission_fee) || 0;
-    const monthly = Number(member.monthly_fee) || 0;
-    const cardio = Number(member.cardio_fee) || 0;
-    const trainer = Number(member.trainer_fee) || 0;
-
-    const cardioMonthsToBill = member.cardio_months !== null ? Number(member.cardio_months) : totalMonthsActive;
-    const trainerMonthsToBill = member.trainer_months !== null ? Number(member.trainer_months) : totalMonthsActive;
-    
-    const totalCost = (monthly * totalMonthsActive) + (cardio * cardioMonthsToBill) + (trainer * trainerMonthsToBill) + admission;
-    const paid = Number(member.paid_amount) || 0;
-    const moneyLeft = totalCost - paid;
-
-    let activeRecurring = monthly;
-    if (cardioMonthsToBill >= totalMonthsActive) activeRecurring += cardio;
-    if (trainerMonthsToBill >= totalMonthsActive) activeRecurring += trainer;
-
-    return { totalMonthsActive, moneyLeft, totalCost, activeRecurring };
-  };
-
   const filteredMembers = useMemo(() => {
     return members.filter(m => 
       m.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || 
       m.phone.includes(searchQuery) ||
       (m.serial_no && m.serial_no.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (m.shift && m.shift.toLowerCase().includes(searchQuery.toLowerCase())) // CHANGED: Added ability to search by shift
+      (m.shift && m.shift.toLowerCase().includes(searchQuery.toLowerCase()))
     );
   }, [members, searchQuery]);
 
   return (
     <div className="min-h-screen bg-black text-white p-4 md:p-8 font-sans">
-      <header className="mb-10 flex flex-col md:flex-row items-center justify-between border-b border-zinc-800 pb-6">
+      <header className="mb-8 flex flex-col md:flex-row items-center justify-between pb-6">
         <div>
           <h1 className="text-4xl font-extrabold italic text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-600 uppercase">Al-Mehran</h1>
           <p className="text-zinc-400 text-sm tracking-widest uppercase">Fitness & Bodybuilding Club</p>
@@ -165,7 +183,39 @@ export default function GymDashboard() {
         </button>
       </header>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+      {/* NEW: Analytics Dashboard */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex items-center gap-4 transition-all hover:border-blue-500/30">
+          <div className="p-3 bg-blue-500/10 text-blue-500 rounded-xl"><Users size={24} /></div>
+          <div>
+            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">Total Members</p>
+            <p className="text-2xl font-bold text-white">{stats.totalUsers}</p>
+          </div>
+        </div>
+        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex items-center gap-4 transition-all hover:border-red-500/30">
+          <div className="p-3 bg-red-500/10 text-red-500 rounded-xl"><Wallet size={24} /></div>
+          <div>
+            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">Total Due Amount</p>
+            <p className="text-2xl font-bold text-white">Rs. {stats.totalDue}</p>
+          </div>
+        </div>
+        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex items-center gap-4 transition-all hover:border-green-500/30">
+          <div className="p-3 bg-green-500/10 text-green-500 rounded-xl"><CheckCircle2 size={24} /></div>
+          <div>
+            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">Cleared Accounts</p>
+            <p className="text-2xl font-bold text-white">{stats.clearCount}</p>
+          </div>
+        </div>
+        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex items-center gap-4 transition-all hover:border-yellow-500/30">
+          <div className="p-3 bg-yellow-500/10 text-yellow-500 rounded-xl"><AlertCircle size={24} /></div>
+          <div>
+            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">Pending Dues</p>
+            <p className="text-2xl font-bold text-white">{stats.dueCount}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 border-t border-zinc-800 pt-8">
         
         {/* Registration Form */}
         <div className="xl:col-span-4 bg-zinc-950 p-6 rounded-2xl border border-zinc-800 self-start z-10 xl:sticky xl:top-8">
@@ -312,7 +362,6 @@ export default function GymDashboard() {
             
             <form onSubmit={handleUpdateMember} className="space-y-4">
               
-              {/* Row 1: Core User Info */}
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="text-xs text-zinc-500 ml-1">Serial Number</label>
                 <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg font-mono" value={editingMember.serial_no || ''} onChange={e => setEditingMember({...editingMember, serial_no: e.target.value})} /></div>
@@ -327,7 +376,6 @@ export default function GymDashboard() {
                 <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.phone} onChange={e => setEditingMember({...editingMember, phone: e.target.value})} /></div>
               </div>
 
-              {/* Row 2: Dates and Shifts */}
               <div className="grid grid-cols-2 gap-4 border-t border-zinc-800 pt-4 mt-4">
                  <div>
                    <label className="text-xs text-zinc-500 ml-1">Join Date</label>
@@ -343,7 +391,6 @@ export default function GymDashboard() {
                  </div>
               </div>
 
-              {/* Row 3: Standard Fees */}
               <div className="grid grid-cols-3 gap-4 border-t border-zinc-800 pt-4 mt-4">
                  <div><label className="text-xs text-zinc-500 ml-1">Admission Fee</label>
                  <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.admission_fee} onChange={e => setEditingMember({...editingMember, admission_fee: e.target.value})} /></div>
@@ -355,7 +402,6 @@ export default function GymDashboard() {
                  <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-green-500" value={editingMember.paid_amount} onChange={e => setEditingMember({...editingMember, paid_amount: e.target.value})} /></div>
               </div>
 
-              {/* Row 4: Extra Service Caps */}
               <div className="grid grid-cols-2 gap-4 border-t border-zinc-800 pt-4 mt-4 bg-zinc-900/50 p-4 rounded-xl">
                  <div>
                     <label className="text-xs text-zinc-400 font-bold ml-1">Cardio Fee Amount</label>
