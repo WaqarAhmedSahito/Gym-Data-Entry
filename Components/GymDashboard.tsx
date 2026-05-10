@@ -14,7 +14,7 @@ export default function GymDashboard() {
   const [formData, setFormData] = useState({
     serial_no: '', full_name: '', father_name: '', phone: '',
     join_date: new Date().toISOString().split('T')[0],
-    shift: 'Evening',
+    shift: 'Both',
     fee_month: new Date().toLocaleString('default', { month: 'long', year: 'numeric' }),
     admission_fee: '', monthly_fee: '', cardio_fee: '', trainer_fee: '', paid_amount: ''
   });
@@ -32,7 +32,6 @@ export default function GymDashboard() {
 
   useEffect(() => { fetchMembers(); }, []);
 
-  // AUTOMATIC CALCULATOR (Moved up so the Analytics can use it)
   const calculateBalance = (member: any) => {
     const today = new Date();
     const joinDate = new Date(member.join_date);
@@ -59,7 +58,6 @@ export default function GymDashboard() {
     return { totalMonthsActive, moneyLeft, totalCost, activeRecurring };
   };
 
-  // NEW: Calculate Dashboard Analytics
   const stats = useMemo(() => {
     let totalDue = 0;
     let clearCount = 0;
@@ -78,7 +76,6 @@ export default function GymDashboard() {
     return { totalUsers: members.length, totalDue, clearCount, dueCount };
   }, [members]);
 
-  // Add New Member
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const data: any = formData; 
@@ -114,7 +111,6 @@ export default function GymDashboard() {
     } as any);
   };
 
-  // Save changes from the Edit Modal
   const handleUpdateMember = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanData = {
@@ -142,7 +138,6 @@ export default function GymDashboard() {
     }
   };
 
-  // Add Payment
   const handlePayment = async (member: any) => {
     const amountStr = prompt(`Enter payment amount for ${member.full_name}:`);
     if (!amountStr) return; 
@@ -154,7 +149,6 @@ export default function GymDashboard() {
     if (!error) fetchMembers();
   };
 
-  // Delete Member
   const deleteMember = async (id: string) => {
     if (confirm("Are you sure you want to remove this member?")) {
       const { error } = await supabase.from('members').delete().eq('id', id);
@@ -162,13 +156,30 @@ export default function GymDashboard() {
     }
   };
 
+  // UPDATED SEARCH LOGIC
   const filteredMembers = useMemo(() => {
-    return members.filter(m => 
-      m.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      m.phone.includes(searchQuery) ||
-      (m.serial_no && m.serial_no.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (m.shift && m.shift.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return members;
+
+    return members.filter(m => {
+      // Name and Shift matching
+      const nameMatch = String(m.full_name || '').toLowerCase().includes(query);
+      const shiftMatch = String(m.shift || '').toLowerCase().includes(query); // Works for "Morning", "Evening", "Both"
+
+      // Exact Numeric Serial Matching
+      let serialMatch = false;
+      if (m.serial_no) {
+        const serialStr = String(m.serial_no).toLowerCase();
+        if (serialStr === query) {
+          serialMatch = true;
+        } else if (!isNaN(Number(query)) && Number(m.serial_no) === Number(query)) {
+          serialMatch = true;
+        }
+      }
+
+      // Removed phoneMatch from the return statement
+      return nameMatch || shiftMatch || serialMatch;
+    });
   }, [members, searchQuery]);
 
   return (
@@ -183,7 +194,7 @@ export default function GymDashboard() {
         </button>
       </header>
 
-      {/* NEW: Analytics Dashboard */}
+      {/* Analytics Dashboard */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex items-center gap-4 transition-all hover:border-blue-500/30">
           <div className="p-3 bg-blue-500/10 text-blue-500 rounded-xl"><Users size={24} /></div>
@@ -290,7 +301,7 @@ export default function GymDashboard() {
         <div className="xl:col-span-8 space-y-4">
           <div className="relative z-0">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input placeholder="Search by name, phone, serial, or shift..." className="w-full bg-zinc-900 border border-zinc-800 p-4 pl-12 rounded-xl focus:border-yellow-500 outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            <input placeholder="Search exact serial (e.g. 1), name, or shift (Morning/Evening/Both)..." className="w-full bg-zinc-900 border border-zinc-800 p-4 pl-12 rounded-xl focus:border-yellow-500 outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           </div>
 
           <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800 min-h-[400px]">
