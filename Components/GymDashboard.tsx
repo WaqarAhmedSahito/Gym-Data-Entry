@@ -184,51 +184,49 @@ export default function GymDashboard() {
 
   const filteredMembers = useMemo(() => {
     if (!searchQuery.trim()) return members;
+    
+    // Split by comma and clean up whitespace
     const searchTerms = searchQuery.toLowerCase().split(',').map(t => t.trim()).filter(t => t !== '');
 
     return members.filter(m => {
       const { moneyLeft } = calculateBalance(m);
 
+      // Every term in the list must match (AND logic)
       return searchTerms.every(term => {
+        // 1. Status filters
         if (term === 'due') return moneyLeft > 0;
         if (term === 'clear') return moneyLeft <= 0;
 
+        // 2. Date filters (e.g., @05 for May, @16/05 for May 16th)
         if (term.startsWith('@')) {
-          const dateQuery = term.substring(1).trim(); 
-          const joinParts = m.join_date ? m.join_date.split('-') : []; 
-
+          const dateQuery = term.substring(1).trim();
+          const joinParts = m.join_date ? m.join_date.split('-') : []; // Expecting YYYY-MM-DD
           if (joinParts.length === 3) {
+            const [year, month, day] = joinParts;
             if (dateQuery.includes('/')) {
-              const [day, month] = dateQuery.split('/').map(p => p.trim());
-              const paddedDay = day.padStart(2, '0');
-              const paddedMonth = month.padStart(2, '0');
-              return joinParts[2] === paddedDay && joinParts[1] === paddedMonth;
+              const [qDay, qMonth] = dateQuery.split('/').map(p => p.padStart(2, '0'));
+              return day === qDay && month === qMonth;
             } else {
-              const paddedMonth = dateQuery.padStart(2, '0');
-              return joinParts[1] === paddedMonth;
+              return month === dateQuery.padStart(2, '0');
             }
           }
           return false;
         }
 
+        // 3. Keyword matches (Name, Shift, Serial)
         const nameMatch = String(m.full_name || '').toLowerCase().includes(term);
         const shiftMatch = String(m.shift || '').toLowerCase().includes(term);
+        const serialMatch = String(m.serial_no || '') === term;
+        
+        // 4. Fee Type searches (User can type 'cardio' or 'trainer')
+        const isCardio = term === 'cardio' && (Number(m.cardio_fee) || 0) > 0;
+        const isTrainer = term === 'trainer' && (Number(m.trainer_fee) || 0) > 0;
 
-        let serialMatch = false;
-        if (m.serial_no) {
-          const serialStr = String(m.serial_no).toLowerCase();
-          if (serialStr === term) {
-            serialMatch = true;
-          } else if (!isNaN(Number(term)) && Number(m.serial_no) === Number(term)) {
-            serialMatch = true;
-          }
-        }
-
-        return nameMatch || shiftMatch || serialMatch;
+        return nameMatch || shiftMatch || serialMatch || isCardio || isTrainer;
       });
     });
   }, [members, searchQuery]);
-
+  
   return (
     <div className="min-h-screen bg-black text-white p-4 md:p-8 font-sans">
       <header className="mb-8 flex flex-col md:flex-row items-center justify-between pb-6">
