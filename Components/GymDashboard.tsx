@@ -2,236 +2,145 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase'; 
-import { Search, UserPlus, Trash2, LogOut, Loader2, CheckCircle2, AlertCircle, Banknote, Calendar, Clock, Settings, X, Users, Wallet, Coins } from 'lucide-react';
+import { UserPlus, LogOut, Loader2, Calendar, Clock } from 'lucide-react';
+import MemberEditor from './MemberEditor';
+import SearchBoard from './SearchBoard';
 
 export default function GymDashboard() {
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<any[]>([]);
+  const [feesList, setFeesList] = useState<any[]>([]); 
   const [searchQuery, setSearchQuery] = useState('');
-  
   const [statsMonth, setStatsMonth] = useState('All');
   const [editingMember, setEditingMember] = useState<any>(null);
 
   const [formData, setFormData] = useState({
     serial_no: '', full_name: '', father_name: '', phone: '',
     join_date: new Date().toISOString().split('T')[0],
-    shift: 'Evening',
-    fee_month: new Date().toLocaleString('default', { month: 'long', year: 'numeric' }),
-    admission_fee: '', monthly_fee: '', cardio_fee: '', trainer_fee: '', paid_amount: '', discount_amount: ''
+    shift: 'Both',
+    admission_fee: '', monthly_fee: '', 
+    cardio_fee: '', cardio_start_date: '',
+    trainer_fee: '', trainer_name: '', trainer_start_date: '',
+    paid_amount: '', discount_amount: ''
   });
 
-  const fetchMembers = async () => {
+  const fetchData = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data: fetchedMembers, error: memError } = await supabase
       .from('members')
       .select('*')
       .order('join_date', { ascending: false });
+
+    const { data: fetchedFees, error: feesError } = await supabase
+      .from('member_fees')
+      .select('*')
+      .order('fee_date', { ascending: false });
     
-    if (!error) setMembers(data || []);
+    if (!memError) setMembers(fetchedMembers || []);
+    if (!feesError) setFeesList(fetchedFees || []);
     setLoading(false);
   };
 
-  useEffect(() => { fetchMembers(); }, []);
+  useEffect(() => { fetchData(); }, []);
 
   const uniqueMonths = useMemo(() => {
-    const months = members.map(m => {
-      if (!m.join_date) return '';
-      const parts = m.join_date.split('-');
-      return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : '';
-    }).filter(Boolean);
-    return ['All', ...Array.from(new Set(months)).sort((a, b) => b.localeCompare(a))];
-  }, [members]);
-
-  const calculateBalance = (member: any) => {
-    const today = new Date();
-    const joinDate = new Date(member.join_date);
-    
-    const monthsDiff = (today.getFullYear() - joinDate.getFullYear()) * 12 + (today.getMonth() - joinDate.getMonth());
-    const totalMonthsActive = Math.max(1, monthsDiff + 1);
-
-    const admission = Number(member.admission_fee) || 0;
-    const monthly = Number(member.monthly_fee) || 0;
-    const cardio = Number(member.cardio_fee) || 0;
-    const trainer = Number(member.trainer_fee) || 0;
-    
-    // NEW: Grab the discount
-    const discount = Number(member.discount_amount) || 0;
-
-    const cardioMonthsToBill = member.cardio_months !== null ? Number(member.cardio_months) : totalMonthsActive;
-    const trainerMonthsToBill = member.trainer_months !== null ? Number(member.trainer_months) : totalMonthsActive;
-    
-    // UPDATED MATH: Subtract the discount from the total cost
-    const baseTotalCost = (monthly * totalMonthsActive) + (cardio * cardioMonthsToBill) + (trainer * trainerMonthsToBill) + admission;
-    const finalTotalCost = baseTotalCost - discount;
-    
-    const paid = Number(member.paid_amount) || 0;
-    const moneyLeft = finalTotalCost - paid;
-
-    let activeRecurring = monthly;
-    if (cardioMonthsToBill >= totalMonthsActive) activeRecurring += cardio;
-    if (trainerMonthsToBill >= totalMonthsActive) activeRecurring += trainer;
-
-    return { totalMonthsActive, moneyLeft, totalCost: finalTotalCost, activeRecurring };
-  };
+    const memberJoinMonths = members.map(m => m.join_date?.slice(0, 7)).filter(Boolean);
+    const transactionMonths = feesList.map(f => f.fee_date?.slice(0, 7)).filter(Boolean);
+    const currentYearMonth = new Date().toISOString().slice(0, 7);
+    return ['All', ...Array.from(new Set([currentYearMonth, ...memberJoinMonths, ...transactionMonths])).sort((a, b) => b.localeCompare(a))];
+  }, [members, feesList]);
 
   const stats = useMemo(() => {
-    let totalDue = 0;
-    let clearCount = 0;
-    let dueCount = 0;
-    let totalCollected = 0;
+    let totalDue = 0, clearCount = 0, dueCount = 0, totalCollected = 0, totalNewJoins = 0;
 
-    let membersToAnalyze = members;
-    if (statsMonth !== 'All') {
-      membersToAnalyze = members.filter(m => m.join_date && m.join_date.startsWith(statsMonth));
+    if (statsMonth === 'All') {
+      totalCollected = feesList.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+      totalNewJoins = members.length;
+    } else {
+      totalCollected = feesList.filter(f => f.fee_date?.startsWith(statsMonth)).reduce((sum, f) => sum + Number(f.amount || 0), 0);
+      totalNewJoins = members.filter(m => m.join_date?.startsWith(statsMonth)).length;
     }
 
-    membersToAnalyze.forEach(member => {
-      const { moneyLeft } = calculateBalance(member);
-      totalCollected += (Number(member.paid_amount) || 0);
-
-      if (moneyLeft <= 0) {
-        clearCount++;
-      } else {
-        dueCount++;
-        totalDue += moneyLeft;
+    members.forEach(member => {
+      const joinDate = new Date(member.join_date);
+      let targetDate = new Date();
+      if (statsMonth !== 'All') {
+        const [year, month] = statsMonth.split('-').map(Number);
+        targetDate = new Date(year, month, 0); 
       }
+      if (joinDate > targetDate) return;
+
+      let monthsDiff = (targetDate.getFullYear() - joinDate.getFullYear()) * 12 + (targetDate.getMonth() - joinDate.getMonth());
+      const totalMonthsActiveContext = Math.max(1, monthsDiff + 1);
+
+      const admission = Number(member.admission_fee) || 0;
+      const monthly = Number(member.monthly_fee) || 0;
+      const cardio = Number(member.cardio_fee) || 0;
+      const trainer = Number(member.trainer_fee) || 0;
+      const discount = Number(member.discount_amount) || 0;
+
+      const cardioMonthsToBill = member.cardio_months !== null ? Math.min(Number(member.cardio_months), totalMonthsActiveContext) : totalMonthsActiveContext;
+      const trainerMonthsToBill = member.trainer_months !== null ? Math.min(Number(member.trainer_months), totalMonthsActiveContext) : totalMonthsActiveContext;
+      
+      const finalCostAtContext = (monthly * totalMonthsActiveContext) + (cardio * cardioMonthsToBill) + (trainer * trainerMonthsToBill) + admission - discount;
+      const paidUpToContext = feesList
+        .filter(f => f.member_id === member.id && (statsMonth === 'All' || f.fee_date <= statsMonth + '-31'))
+        .reduce((sum, f) => sum + Number(f.amount || 0), 0);
+
+      const moneyLeftAtContext = finalCostAtContext - paidUpToContext;
+      if (moneyLeftAtContext <= 0) clearCount++;
+      else { dueCount++; totalDue += moneyLeftAtContext; }
     });
 
-    return { totalUsers: membersToAnalyze.length, totalDue, clearCount, dueCount, totalCollected };
-  }, [members, statsMonth]);
+    return { totalNewJoins, totalDue, clearCount, dueCount, totalCollected };
+  }, [members, feesList, statsMonth]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const data: any = formData; 
-    
     const cleanData = {
-      serial_no: data.serial_no,
-      full_name: data.full_name || data.fullName,
-      father_name: data.father_name || data.fatherName || "",
-      phone: data.phone,
-      join_date: data.join_date || data.joinDate,
-      shift: data.shift,
-      admission_fee: Number(data.admission_fee || data.admissionFee) || 0,
-      monthly_fee: Number(data.monthly_fee || data.monthlyFee) || 0,
-      cardio_fee: Number(data.cardio_fee || data.cardioFee) || 0,
-      trainer_fee: Number(data.trainer_fee || data.trainerFee) || 0,
-      paid_amount: Number(data.paid_amount || data.paidAmount) || 0,
-      discount_amount: Number(data.discount_amount || data.discountAmount) || 0 // NEW
+      serial_no: formData.serial_no,
+      full_name: formData.full_name,
+      father_name: formData.father_name || "",
+      phone: formData.phone,
+      join_date: formData.join_date,
+      shift: formData.shift,
+      admission_fee: Number(formData.admission_fee) || 0,
+      monthly_fee: Number(formData.monthly_fee) || 0,
+      cardio_fee: Number(formData.cardio_fee) || 0,
+      cardio_start_date: formData.cardio_start_date || null,
+      trainer_fee: Number(formData.trainer_fee) || 0,
+      trainer_name: formData.trainer_name || "",
+      trainer_start_date: formData.trainer_start_date || null,
+      paid_amount: Number(formData.paid_amount) || 0,
+      discount_amount: Number(formData.discount_amount) || 0 
     };
 
-    const { error } = await supabase.from('members').insert([cleanData]);
-    
-    if (error) {
-      alert("Failed to save member: " + error.message);
-      return; 
+    const { data: newMember, error } = await supabase.from('members').insert([cleanData]).select().single();
+    if (error) return alert("Failed to save member: " + error.message);
+
+    if (Number(formData.paid_amount) > 0 && newMember) {
+      await supabase.from('member_fees').insert([{
+        member_id: newMember.id,
+        serial_no: newMember.serial_no,
+        fee_date: formData.join_date,
+        amount: Number(formData.paid_amount)
+      }]);
     }
 
-    fetchMembers(); 
+    fetchData(); 
     setFormData({
       serial_no: '', full_name: '', father_name: '', phone: '',
-      join_date: new Date().toISOString().split('T')[0],
-      shift: 'Evening',
-      fee_month: new Date().toLocaleString('default', { month: 'long', year: 'numeric' }),
-      admission_fee: '', monthly_fee: '', cardio_fee: '', trainer_fee: '', paid_amount: '', discount_amount: ''
-    } as any);
-  };
-
-  const handleUpdateMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanData = {
-      serial_no: editingMember.serial_no,
-      full_name: editingMember.full_name,
-      father_name: editingMember.father_name,
-      phone: editingMember.phone,
-      join_date: editingMember.join_date,
-      shift: editingMember.shift,
-      admission_fee: Number(editingMember.admission_fee) || 0,
-      monthly_fee: Number(editingMember.monthly_fee) || 0,
-      cardio_fee: Number(editingMember.cardio_fee) || 0,
-      trainer_fee: Number(editingMember.trainer_fee) || 0,
-      paid_amount: Number(editingMember.paid_amount) || 0,
-      discount_amount: Number(editingMember.discount_amount) || 0, // NEW
-      cardio_months: editingMember.cardio_months === '' || editingMember.cardio_months === null ? null : Number(editingMember.cardio_months),
-      trainer_months: editingMember.trainer_months === '' || editingMember.trainer_months === null ? null : Number(editingMember.trainer_months),
-    };
-
-    const { error } = await supabase.from('members').update(cleanData).eq('id', editingMember.id);
-    if (error) {
-      alert("Error saving: " + error.message);
-    } else {
-      setEditingMember(null);
-      fetchMembers();
-    }
-  };
-
-  const handlePayment = async (member: any) => {
-    const amountStr = prompt(`Enter payment amount for ${member.full_name}:`);
-    if (!amountStr) return; 
-    const paymentAmount = Number(amountStr);
-    if (isNaN(paymentAmount) || paymentAmount <= 0) return alert("Valid number required.");
-
-    const newTotalPaid = (Number(member.paid_amount) || 0) + paymentAmount;
-    const { error } = await supabase.from('members').update({ paid_amount: newTotalPaid }).eq('id', member.id);
-    if (!error) fetchMembers();
-  };
-
-  const deleteMember = async (id: string) => {
-    if (confirm("Are you sure you want to remove this member?")) {
-      const { error } = await supabase.from('members').delete().eq('id', id);
-      if (!error) fetchMembers();
-    }
-  };
-
-  const filteredMembers = useMemo(() => {
-    if (!searchQuery.trim()) return members;
-    
-    // Split by comma and clean up whitespace
-    const searchTerms = searchQuery.toLowerCase().split(',').map(t => t.trim()).filter(t => t !== '');
-
-    return members.filter(m => {
-      const { moneyLeft } = calculateBalance(m);
-
-      // Every term in the list must match (AND logic)
-      return searchTerms.every(term => {
-        // 1. Status filters
-        if (term === 'due') return moneyLeft > 0;
-        if (term === 'clear') return moneyLeft <= 0;
-
-        // 2. Date filters (e.g., @05 for May, @16/05 for May 16th)
-        if (term.startsWith('@')) {
-          const dateQuery = term.substring(1).trim();
-          const joinParts = m.join_date ? m.join_date.split('-') : []; // Expecting YYYY-MM-DD
-          if (joinParts.length === 3) {
-            const [year, month, day] = joinParts;
-            if (dateQuery.includes('/')) {
-              const [qDay, qMonth] = dateQuery.split('/').map(p => p.padStart(2, '0'));
-              return day === qDay && month === qMonth;
-            } else {
-              return month === dateQuery.padStart(2, '0');
-            }
-          }
-          return false;
-        }
-
-        // 3. Keyword matches (Name, Shift, Serial)
-        const nameMatch = String(m.full_name || '').toLowerCase().includes(term);
-        const shiftMatch = String(m.shift || '').toLowerCase().includes(term);
-        const serialMatch = String(m.serial_no || '') === term;
-        
-        // 4. Fee Type searches (User can type 'cardio' or 'trainer')
-        const isCardio = term === 'cardio' && (Number(m.cardio_fee) || 0) > 0;
-        const isTrainer = term === 'trainer' && (Number(m.trainer_fee) || 0) > 0;
-
-        return nameMatch || shiftMatch || serialMatch || isCardio || isTrainer;
-      });
+      join_date: new Date().toISOString().split('T')[0], shift: 'Evening',
+      admission_fee: '', monthly_fee: '', cardio_fee: '', cardio_start_date: '',
+      trainer_fee: '', trainer_name: '', trainer_start_date: '', paid_amount: '', discount_amount: ''
     });
-  }, [members, searchQuery]);
-  
+  };
+
   return (
     <div className="min-h-screen bg-black text-white p-4 md:p-8 font-sans">
       <header className="mb-8 flex flex-col md:flex-row items-center justify-between pb-6">
         <div>
-          <h1 className="text-4xl font-extrabold italic text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-600 uppercase">Al-Mehran</h1>
+          <h1 className="text-4xl font-extrabold italic text-transparent bg-clip-text bg-linear-to-r from-yellow-400 to-yellow-600 uppercase">Al-Mehran</h1>
           <p className="text-zinc-400 text-sm tracking-widest uppercase">Fitness & Bodybuilding Club</p>
         </div>
         <button onClick={() => supabase.auth.signOut()} className="mt-4 md:mt-0 flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-red-500/20 text-zinc-400 hover:text-red-500 rounded-lg border border-zinc-800 transition-all">
@@ -239,95 +148,43 @@ export default function GymDashboard() {
         </button>
       </header>
 
+      {/* Analytics Section */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-4">
         <h2 className="text-xl font-bold text-white mb-2 md:mb-0">Analytics Overview</h2>
         <div className="flex items-center gap-2">
-          <span className="text-zinc-400 text-sm">Filter Stats by Join Month:</span>
-          <select 
-            className="bg-zinc-900 border border-zinc-800 py-1.5 px-3 rounded-lg text-sm outline-none focus:border-yellow-500 text-yellow-500 font-bold"
-            value={statsMonth}
-            onChange={e => setStatsMonth(e.target.value)}
-          >
-            {uniqueMonths.map(month => (
-              <option key={month} value={month}>
-                {month === 'All' ? 'All-Time' : month}
-              </option>
-            ))}
+          <span className="text-zinc-400 text-sm">Filter Metrics By:</span>
+          <select className="bg-zinc-900 border border-zinc-800 py-1.5 px-3 rounded-lg text-sm text-yellow-500 font-bold outline-none" value={statsMonth} onChange={e => setStatsMonth(e.target.value)}>
+            {uniqueMonths.map(m => <option key={m} value={m}>{m === 'All' ? 'All-Time' : m}</option>)}
           </select>
         </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-center transition-all hover:border-blue-500/30">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-blue-500/10 text-blue-500 rounded-lg"><Users size={20} /></div>
-            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">Members</p>
-          </div>
-          <p className="text-2xl font-bold text-white">{stats.totalUsers}</p>
-        </div>
-
-        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-center transition-all hover:border-green-500/30">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-green-500/10 text-green-500 rounded-lg"><Coins size={20} /></div>
-            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">Total Collected</p>
-          </div>
-          <p className="text-2xl font-bold text-white">Rs. {stats.totalCollected}</p>
-        </div>
-
-        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-center transition-all hover:border-red-500/30">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-red-500/10 text-red-500 rounded-lg"><Wallet size={20} /></div>
-            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">Total Due</p>
-          </div>
-          <p className="text-2xl font-bold text-white">Rs. {stats.totalDue}</p>
-        </div>
-
-        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-center transition-all hover:border-emerald-500/30">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-lg"><CheckCircle2 size={20} /></div>
-            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">Cleared Accts</p>
-          </div>
-          <p className="text-2xl font-bold text-white">{stats.clearCount}</p>
-        </div>
-
-        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex flex-col justify-center transition-all hover:border-yellow-500/30">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-yellow-500/10 text-yellow-500 rounded-lg"><AlertCircle size={20} /></div>
-            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">Pending Dues</p>
-          </div>
-          <p className="text-2xl font-bold text-white">{stats.dueCount}</p>
-        </div>
+        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl border-l-4 border-l-blue-500"><p className="text-[10px] font-bold uppercase text-zinc-500">New Joins</p><p className="text-2xl font-bold mt-1">{stats.totalNewJoins}</p></div>
+        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl border-l-4 border-l-green-500"><p className="text-[10px] font-bold uppercase text-zinc-500">Revenue</p><p className="text-2xl font-bold mt-1">Rs. {stats.totalCollected}</p></div>
+        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl border-l-4 border-l-red-500"><p className="text-[10px] font-bold uppercase text-zinc-500">Unpaid Dues</p><p className="text-2xl font-bold mt-1">Rs. {stats.totalDue}</p></div>
+        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl border-l-4 border-l-emerald-500"><p className="text-[10px] font-bold uppercase text-zinc-500">Cleared</p><p className="text-2xl font-bold mt-1">{stats.clearCount}</p></div>
+        <div className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl border-l-4 border-l-yellow-500"><p className="text-[10px] font-bold uppercase text-zinc-500">Pending</p><p className="text-2xl font-bold mt-1">{stats.dueCount}</p></div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 border-t border-zinc-800 pt-8">
-        
-        {/* Registration Form */}
-        <div className="xl:col-span-4 bg-zinc-950 p-6 rounded-2xl border border-zinc-800 self-start z-10 xl:sticky xl:top-8">
-          <h2 className="text-xl font-bold mb-6 flex items-center text-yellow-500">
-            <UserPlus className="mr-2" /> NEW ADMISSION
-          </h2>
+        {/* Admission Form */}
+        <div className="xl:col-span-4 bg-zinc-950 p-6 rounded-2xl border border-zinc-800 self-start xl:sticky xl:top-8">
+          <h2 className="text-xl font-bold mb-6 flex items-center text-yellow-500"><UserPlus className="mr-2" /> NEW ADMISSION</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <input required placeholder="Serial No." className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white font-mono" value={formData.serial_no} onChange={e => setFormData({...formData, serial_no: e.target.value})} />
+            <input required placeholder="Full Name" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white" value={formData.full_name} onChange={e => setFormData({...formData, full_name: e.target.value})} />
+            <input placeholder="Father Name" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white" value={formData.father_name} onChange={e => setFormData({...formData, father_name: e.target.value})} />
+            <input required placeholder="Phone Number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
             
-            <input required placeholder="Serial No. " className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-yellow-500 outline-none font-mono" 
-              value={formData.serial_no} onChange={e => setFormData({...formData, serial_no: e.target.value})} />
-              
-            <input required placeholder="Full Name" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-yellow-500 outline-none" 
-              value={formData.full_name} onChange={e => setFormData({...formData, full_name: e.target.value})} />
-            <input placeholder="Father Name" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-yellow-500 outline-none" 
-              value={formData.father_name} onChange={e => setFormData({...formData, father_name: e.target.value})} />
-            <input required placeholder="Phone Number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-yellow-500 outline-none" 
-              value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
-            
-            <div className="grid grid-cols-2 gap-3 pt-2">
+            <div className="grid grid-cols-2 gap-3">
                <div>
-                 <label className="text-xs text-zinc-500 ml-1 mb-1 flex items-center gap-1"><Calendar size={12}/> Join Date</label>
-                 <input type="date" required className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg outline-none focus:border-yellow-500 [color-scheme:dark]"
-                   value={formData.join_date} onChange={e => setFormData({...formData, join_date: e.target.value})} />
+                 <label className="text-xs text-zinc-500 flex items-center gap-1 mb-1"><Calendar size={12}/> Join Date</label>
+                 <input type="date" required className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg scheme-dark text-white" value={formData.join_date} onChange={e => setFormData({...formData, join_date: e.target.value})} />
                </div>
                <div>
-                 <label className="text-xs text-zinc-500 ml-1 mb-1 flex items-center gap-1"><Clock size={12}/> Shift</label>
-                 <select className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg outline-none focus:border-yellow-500 text-white"
-                   value={formData.shift} onChange={e => setFormData({...formData, shift: e.target.value})}>
+                 <label className="text-xs text-zinc-500 flex items-center gap-1 mb-1"><Clock size={12}/> Shift</label>
+                 <select className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white" value={formData.shift} onChange={e => setFormData({...formData, shift: e.target.value})}>
                    <option value="Morning">Morning</option>
                    <option value="Evening">Evening</option>
                    <option value="Both">Both</option>
@@ -335,194 +192,53 @@ export default function GymDashboard() {
                </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800 mt-2">
-               <div>
-                 <label className="text-xs text-zinc-500 ml-1 mb-1 block">Admission Fee</label>
-                 <input type="number" placeholder="0" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg outline-none focus:border-yellow-500"
-                   value={formData.admission_fee} onChange={e => setFormData({...formData, admission_fee: e.target.value})} />
-               </div>
-               <div>
-                 <label className="text-xs text-zinc-500 ml-1 mb-1 block">Monthly Gym Fee</label>
-                 <input type="number" placeholder="0" required className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg outline-none focus:border-yellow-500"
-                   value={formData.monthly_fee} onChange={e => setFormData({...formData, monthly_fee: e.target.value})} />
-               </div>
-               <div>
-                 <label className="text-xs text-zinc-500 ml-1 mb-1 block">Cardio Fee</label>
-                 <input type="number" placeholder="0" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg outline-none focus:border-yellow-500"
-                   value={formData.cardio_fee} onChange={e => setFormData({...formData, cardio_fee: e.target.value})} />
-               </div>
-               <div>
-                 <label className="text-xs text-zinc-500 ml-1 mb-1 block">Trainer Fee</label>
-                 <input type="number" placeholder="0" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg outline-none focus:border-yellow-500"
-                   value={formData.trainer_fee} onChange={e => setFormData({...formData, trainer_fee: e.target.value})} />
-               </div>
+            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800">
+               <input type="number" placeholder="Admission Fee" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white" value={formData.admission_fee} onChange={e => setFormData({...formData, admission_fee: e.target.value})} />
+               <input type="number" placeholder="Monthly Gym Fee" required className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white" value={formData.monthly_fee} onChange={e => setFormData({...formData, monthly_fee: e.target.value})} />
             </div>
 
-            <div className="pt-2 border-t border-zinc-800">
-              <label className="text-xs text-zinc-500 ml-1 mb-1 block">Initial Payment Received</label>
-              <input type="number" placeholder="Amount Paid Today" required className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg outline-none focus:border-green-500"
-                  value={formData.paid_amount} onChange={e => setFormData({...formData, paid_amount: e.target.value})} />
+            <div className="grid grid-cols-2 gap-3 p-2 bg-zinc-900/30 rounded-xl border border-zinc-800/50">
+               <input type="number" placeholder="Cardio Fee" className="w-full bg-zinc-900 border border-zinc-800 p-2 text-sm rounded-lg text-white" value={formData.cardio_fee} onChange={e => setFormData({...formData, cardio_fee: e.target.value})} />
+               <input type="date" className="w-full bg-zinc-900 border border-zinc-800 p-2 text-sm rounded-lg scheme-dark text-white" value={formData.cardio_start_date} onChange={e => setFormData({...formData, cardio_start_date: e.target.value})} />
             </div>
-            
-            <button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 mt-4 rounded-lg transition-transform active:scale-95">
-              SAVE MEMBER
-            </button>
+
+            <div className="space-y-2 p-2 bg-blue-500/5 rounded-xl border border-blue-500/10">
+               <div className="grid grid-cols-2 gap-3">
+                 <input type="number" placeholder="Trainer Fee" className="w-full bg-zinc-900 border border-zinc-800 p-2 text-sm rounded-lg text-white" value={formData.trainer_fee} onChange={e => setFormData({...formData, trainer_fee: e.target.value})} />
+                 <input type="date" className="w-full bg-zinc-900 border border-zinc-800 p-2 text-sm rounded-lg scheme-dark text-white" value={formData.trainer_start_date} onChange={e => setFormData({...formData, trainer_start_date: e.target.value})} />
+               </div>
+               <input placeholder="Trainer Name" className="w-full bg-zinc-900 border border-zinc-800 p-2 text-sm rounded-lg text-white" value={formData.trainer_name} onChange={e => setFormData({...formData, trainer_name: e.target.value})} />
+            </div>
+
+            <input type="number" placeholder="Initial Payment Received" required className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white" value={formData.paid_amount} onChange={e => setFormData({...formData, paid_amount: e.target.value})} />
+            <button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-lg">SAVE MEMBER</button>
           </form>
         </div>
 
-        {/* Search & List */}
+        {/* SearchBoard and Member Management Hub */}
         <div className="xl:col-span-8 space-y-4">
-          <div className="relative z-0">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input 
-              placeholder="Search e.g., '@16/4', 'due', 'clear', or 'morning'..." 
-              className="w-full bg-zinc-900 border border-zinc-800 p-4 pl-12 rounded-xl focus:border-yellow-500 outline-none" 
-              value={searchQuery} 
-              onChange={e => setSearchQuery(e.target.value)} 
-            />
-          </div>
-
-          <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800 min-h-[400px]">
-            {loading ? (
-              <div className="flex justify-center py-20"><Loader2 className="animate-spin text-yellow-500" /></div>
-            ) : filteredMembers.map(member => {
-              const { totalMonthsActive, moneyLeft, activeRecurring } = calculateBalance(member);
-
-              return (
-                <div key={member.id} className="group flex flex-col md:flex-row items-start md:items-center justify-between p-4 mb-3 bg-zinc-900 rounded-xl border border-zinc-800 hover:border-yellow-500/40 transition-all">
-                  
-                  {/* Left Side: Info */}
-                  <div className="mb-3 md:mb-0">
-                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
-                      <span className="text-zinc-600 font-mono text-sm">#{member.serial_no || 'N/A'}</span>
-                      {member.full_name}
-                    </h3>
-
-                    <div className="flex flex-wrap items-center gap-2 mt-1">
-                      <span className="text-zinc-400 text-sm">{member.phone}</span>
-                      <span className="text-zinc-600 text-xs">•</span>
-                      <span className="bg-zinc-800 text-yellow-500 px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider">{member.shift || 'Evening'}</span>
-                      <span className="text-zinc-600 text-xs">•</span>
-                      <span className="text-zinc-400 text-xs">Rs. {activeRecurring}/mo</span>
-                    </div>
-                    <p className="text-zinc-500 text-xs mt-2">Joined: {member.join_date} <span className="text-zinc-600 mx-1">•</span> Active for {totalMonthsActive} month(s)</p>
-                  </div>
-
-                  {/* Right Side: Status & Actions */}
-                  <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end mt-4 md:mt-0">
-                    <div className="text-right mr-2">
-                      {moneyLeft <= 0 ? (
-                        <div className="flex items-center gap-1 text-green-500 bg-green-500/10 px-3 py-1 rounded-full border border-green-500/20">
-                          <CheckCircle2 size={16} /><span className="font-bold text-sm">Clear</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1 text-red-500 bg-red-500/10 px-3 py-1 rounded-full border border-red-500/20">
-                          <AlertCircle size={16} /><span className="font-bold text-sm">Rs. {moneyLeft} Due</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <button onClick={() => handlePayment(member)} className="text-zinc-600 hover:text-green-500 p-2 transition-colors" title="Add Payment">
-                      <Banknote size={18} />
-                    </button>
-                    <button onClick={() => setEditingMember(member)} className="text-zinc-600 hover:text-blue-500 p-2 transition-colors" title="Edit Member/Settings">
-                      <Settings size={18} />
-                    </button>
-                    <button onClick={() => deleteMember(member.id)} className="text-zinc-600 hover:text-red-500 p-2 transition-colors" title="Remove Member">
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            {filteredMembers.length === 0 && !loading && <div className="text-center text-zinc-500 py-10">No matches found.</div>}
-          </div>
+          <SearchBoard 
+            members={members} 
+            setMembers={setMembers}
+            feesList={feesList} 
+            setFeesList={setFeesList}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            setEditingMember={setEditingMember}
+            refreshTrigger={fetchData}
+          />
         </div>
       </div>
 
-      {/* EXPANDED EDIT MEMBER MODAL */}
+      {/* Profile Modification Portal */}
       {editingMember && (
-        <div className="fixed inset-0 bg-black/90 flex justify-center items-center z-50 p-4">
-          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-yellow-500">Edit Member Profile</h2>
-              <button onClick={() => setEditingMember(null)} className="text-zinc-500 hover:text-white"><X size={24} /></button>
-            </div>
-            
-            <form onSubmit={handleUpdateMember} className="space-y-4">
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="text-xs text-zinc-500 ml-1">Serial Number</label>
-                <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg font-mono" value={editingMember.serial_no || ''} onChange={e => setEditingMember({...editingMember, serial_no: e.target.value})} /></div>
-                
-                <div><label className="text-xs text-zinc-500 ml-1">Full Name</label>
-                <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.full_name} onChange={e => setEditingMember({...editingMember, full_name: e.target.value})} /></div>
-                
-                <div><label className="text-xs text-zinc-500 ml-1">Father Name</label>
-                <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.father_name || ''} onChange={e => setEditingMember({...editingMember, father_name: e.target.value})} /></div>
-
-                <div><label className="text-xs text-zinc-500 ml-1">Phone Number</label>
-                <input className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.phone} onChange={e => setEditingMember({...editingMember, phone: e.target.value})} /></div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 border-t border-zinc-800 pt-4 mt-4">
-                 <div>
-                   <label className="text-xs text-zinc-500 ml-1">Join Date</label>
-                   <input type="date" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg [color-scheme:dark]" value={editingMember.join_date} onChange={e => setEditingMember({...editingMember, join_date: e.target.value})} />
-                 </div>
-                 <div>
-                   <label className="text-xs text-zinc-500 ml-1">Shift</label>
-                   <select className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg text-white" value={editingMember.shift} onChange={e => setEditingMember({...editingMember, shift: e.target.value})}>
-                     <option value="Morning">Morning</option>
-                     <option value="Evening">Evening</option>
-                     <option value="Both">Both</option>
-                   </select>
-                 </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4 border-t border-zinc-800 pt-4 mt-4">
-                 <div><label className="text-xs text-zinc-500 ml-1">Admission Fee</label>
-                 <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.admission_fee} onChange={e => setEditingMember({...editingMember, admission_fee: e.target.value})} /></div>
-
-                 <div><label className="text-xs text-zinc-500 ml-1">Monthly Gym Fee</label>
-                 <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.monthly_fee} onChange={e => setEditingMember({...editingMember, monthly_fee: e.target.value})} /></div>
-
-                 <div><label className="text-xs text-zinc-500 ml-1">Total Paid So Far</label>
-                 <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg focus:border-green-500" value={editingMember.paid_amount} onChange={e => setEditingMember({...editingMember, paid_amount: e.target.value})} /></div>
-              </div>
-
-              {/* NEW: Adjustment Row */}
-              <div className="border-t border-zinc-800 pt-4 mt-4 bg-yellow-500/5 p-4 rounded-xl border border-yellow-500/20">
-                <label className="text-xs text-yellow-500 font-bold ml-1">Account Adjustment / Discount (Rs.)</label>
-                <input type="number" placeholder="e.g. 10000" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg mt-2 focus:border-yellow-500" value={editingMember.discount_amount || ''} onChange={e => setEditingMember({...editingMember, discount_amount: e.target.value})} />
-                <p className="text-[10px] text-zinc-500 mt-1">Use this to fix balances if you increase someone's fee later. (e.g. If the system overcharges by 10k due to a rate change, type 10000 here to balance it out).</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 border-t border-zinc-800 pt-4 mt-4 bg-zinc-900/50 p-4 rounded-xl">
-                 <div>
-                    <label className="text-xs text-zinc-400 font-bold ml-1">Cardio Fee Amount</label>
-                    <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg mb-2" value={editingMember.cardio_fee} onChange={e => setEditingMember({...editingMember, cardio_fee: e.target.value})} />
-                    
-                    <label className="text-xs text-red-400 font-bold ml-1">Limit Cardio (Months Billed)</label>
-                    <input type="number" placeholder="Leave empty to bill forever" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.cardio_months !== null ? editingMember.cardio_months : ''} onChange={e => setEditingMember({...editingMember, cardio_months: e.target.value})} />
-                 </div>
-                 
-                 <div>
-                    <label className="text-xs text-zinc-400 font-bold ml-1">Trainer Fee Amount</label>
-                    <input type="number" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg mb-2" value={editingMember.trainer_fee} onChange={e => setEditingMember({...editingMember, trainer_fee: e.target.value})} />
-                    
-                    <label className="text-xs text-red-400 font-bold ml-1">Limit Trainer (Months Billed)</label>
-                    <input type="number" placeholder="Leave empty to bill forever" className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-lg" value={editingMember.trainer_months !== null ? editingMember.trainer_months : ''} onChange={e => setEditingMember({...editingMember, trainer_months: e.target.value})} />
-                 </div>
-              </div>
-
-              <div className="flex gap-4 pt-4 border-t border-zinc-800 mt-2">
-                 <button type="button" onClick={() => setEditingMember(null)} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-lg transition-colors">Cancel</button>
-                 <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-transform active:scale-95">Save Profile Updates</button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <MemberEditor 
+          editingMember={editingMember} 
+          setEditingMember={setEditingMember} 
+          feesList={feesList} 
+          setFeesList={setFeesList}
+          onUpdateComplete={fetchData} 
+        />
       )}
     </div>
   );
